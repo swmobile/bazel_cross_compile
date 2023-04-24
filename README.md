@@ -228,6 +228,7 @@ It instructs bazel to look for aarch64 toolchain in the cc_toolchain_suite rule 
 
 This file contains definitions of all tools we want to use when cross compiling:
 
+```
 $ cat bazel/toolchain/aarch64-rpi3-linux-gnu/BUILD 
 package(default_visibility = ["//visibility:public"])
 
@@ -272,10 +273,12 @@ cc_toolchain_suite(
     },
     tags = ["manual"]
 )
+```
 The filegroups are convenience wrappers for files referenced from the externally downloaded artifacts of the compiler and sysroot. This can be more granular as seen from the cc_toolchain rule definition, but to keep it simple we will reference all files everywhere.
 
 In order to hide from bazel where do we actually get our compiler from, we need to create some wrapper files:
 
+```
 $ tree bazel/toolchain/aarch64-rpi3-linux-gnu/wrappers/
 bazel/toolchain/aarch64-rpi3-linux-gnu/wrappers/
 ├── aarch64-rpi3-linux-gnu-ar -> wrapper
@@ -287,8 +290,10 @@ bazel/toolchain/aarch64-rpi3-linux-gnu/wrappers/
 ├── aarch64-rpi3-linux-gnu-objdump -> wrapper
 ├── aarch64-rpi3-linux-gnu-strip -> wrapper
 └── wrapper
+```
 This is needed, because in the tool specifications we cannot reference external repositories with @ syntax and bazel expects this tool to live relatively to the cc_toolchain rule. Therefore we reference the wrapper script, which in the end knows where does the actual tool reside:
 
+```
 $ cat bazel/toolchain/aarch64-rpi3-linux-gnu/wrappers/wrapper 
 #!/bin/bash
  
@@ -296,15 +301,19 @@ NAME=$(basename "$0")
 TOOLCHAIN_BINDIR=external/aarch64-rpi3-linux-gnu/bin
  
 exec "${TOOLCHAIN_BINDIR}"/"${NAME}" "$@"
+```
 Bazel will call bazel/toolchain/aarch64-rpi3-linux-gnu/wrappers/aarch64-rpi3-linux-gnu-gcc which will exec the actuall gcc which resides inside the sandobx in the external directory: external/aarch64-rpi3-linux-gnu/bin/aarch64-rpi3-linux-gnu-gcc.
 
 The lines:
 
+```
 load(":cc_toolchain_config.bzl", "cc_toolchain_config")
 ...
 cc_toolchain_config(name = "aarch64_toolchain_config")
+```
 load the toolchain configuration from an additional file, which contains the path for particular toolchain tools, as well as default flags for compilation and linking steps:
 
+```
 $ cat bazel/toolchain/aarch64-rpi3-linux-gnu/cc_toolchain_config.bzl 
 load("@bazel_tools//tools/build_defs/cc:action_names.bzl", "ACTION_NAMES")
 load("@bazel_tools//tools/cpp:cc_toolchain_config_lib.bzl",
@@ -434,10 +443,12 @@ cc_toolchain_config = rule(
     attrs = {},
     provides = [CcToolchainConfigInfo],
 )
+```
 What is happening here is that we create a new rule which will return a CcToolchainConfigInfo data structure containing all the tools Bazel needs for compiling. Additionally we set up features, which are a way of specifying behaviors of the toolchain, in our case we specify default flags for compiling and linking C++ code.
 
 With all the code above we can now build for aarch64:
 
+```
 $ bazel build --crosstool_top=//bazel/toolchain/aarch64-rpi3-linux-gnu:gcc_toolchain --cpu=aarch64 //:hello 
 INFO: Build options --cpu and --crosstool_top have changed, discarding analysis cache.
 INFO: Analyzed target //:hello (0 packages loaded, 7129 targets configured).
@@ -450,9 +461,11 @@ INFO: Build completed successfully, 1 total action
 
 $ file bazel-bin/hello
 bazel-bin/hello: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), dynamically linked, interpreter /lib/ld-linux-aarch64.so.1, for GNU/Linux 5.5.5, not stripped
-Setting up custom platforms
+```
+## Setting up custom platforms
 There are few additional steps needed to use platforms with the above setup. First we need to define our new platform:
 
+```
 $ cat bazel/platforms/BUILD 
 platform(
     name = "rpi",
@@ -461,8 +474,10 @@ platform(
         "@platforms//os:linux",
     ],
 )
+```
 Second, we need to create new platform-compatible toolchain target:
 
+```
 $ cat bazel/toolchain/aarch64-rpi3-linux-gnu/BUILD 
 ...
 
@@ -479,8 +494,10 @@ toolchain(
     toolchain = ":aarch64_toolchain",
     toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
 )
+```
 Third, register the toolchain in the WORKSPACE file:
 
+```
 $ cat bazel/toolchain/toolchain.bzl 
 def register_all_toolchains():
     native.register_toolchains(
@@ -491,8 +508,10 @@ $ cat WORKSPACE
 
 load("//bazel/toolchain:toolchain.bzl", "register_all_toolchains")
 register_all_toolchains()
+```
 With that done, Bazel needs different command line arguments to use platforms:
 
+```
 $ bazel build \
     --incompatible_enable_cc_toolchain_resolution \
     --platforms=//bazel/platforms:rpi \
@@ -508,9 +527,11 @@ INFO: Build completed successfully, 6 total actions
 
 $ file bazel-bin/hello
 bazel-bin/hello: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), dynamically linked, interpreter /lib/ld-linux-aarch64.so.1, for GNU/Linux 5.5.5, not stripped
-Setting up .bazelrc
+```
+## Setting up .bazelrc
 For convenience all of the additional command line arguments can be hidden in the .bazelrc file:
 
+```
 $ cat .bazelrc 
 build:rpi --crosstool_top=//bazel/toolchain/aarch64-rpi3-linux-gnu:gcc_toolchain --cpu=aarch64
 build:bbb --crosstool_top=//bazel/toolchain/arm-cortex_a8-linux-gnueabihf:gcc_toolchain --cpu=armv7
@@ -518,10 +539,14 @@ build:bbb --crosstool_top=//bazel/toolchain/arm-cortex_a8-linux-gnueabihf:gcc_to
 build:platform_build --incompatible_enable_cc_toolchain_resolution
 build:rpi-platform --config=platform_build --platforms=//bazel/platforms:rpi
 build:bbb-platform --config=platform_build --platforms=//bazel/platforms:bbb
+```
 Invocation simplifies to:
 
+```
 $ bazel build --config=rpi //:hello
 
 $ bazel build --config=rpi-platform //:hello
-Summary
+```
+
+## Summary
 Those steps should be valid for most of the C++ toolchains with slight modifications. Although the process of setting it up might be complicated in the end the benefits are really worth it. You get out-of-the-box cached, distributed and one-command build.
