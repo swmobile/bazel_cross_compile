@@ -3,7 +3,7 @@
 Repository with examples for blog post:
 - https://ltekieli.com/cross-compiling-with-bazel/
 
-Cross compiling with Bazel
+## Cross compiling with Bazel
 Łukasz Tekieli
 Łukasz Tekieli
 Sep 17, 2020 • 8 min read
@@ -11,15 +11,16 @@ This time a short introduction to Bazel and how to cross-compile with this tool.
 
 You can get the partial repositories used in this exercise here.
 
-Installing Bazelisk
+## Installing Bazelisk
 I highly recommend using Bazelisk for managing your Bazel installation. TLDR:
-
+```
 $ wget https://github.com/bazelbuild/bazelisk/releases/download/v1.6.1/bazelisk-linux-amd64
 $ sudo mv bazelisk-linux-amd64 /usr/local/bin/bazel
 $ sudo chmod +x /usr/local/bin/bazel
+```
 Compiling "Hello World!"
 Simplest possible structure for a C++ projects looks like this:
-
+```
 $ tree
 .
 ├── BUILD
@@ -38,13 +39,14 @@ $ cat main.cpp
 int main() {
     std::cout << "Hello World!" << std::endl;
 }
+```
 WORKSPACE file defines the root of the source tree. In our case it is empty, but usually it contains various definitions needed for your project to build.
 In the BUILD file resides a definition of our single target called "hello", which will be constructed from main.cpp
 
 Everything you need to know about Bazel's terminology is here.
 
 We can now build:
-
+```
 $ bazel build //:hello
 2020/09/02 17:21:34 Downloading https://releases.bazel.build/3.4.1/release/bazel-3.4.1-linux-x86_64...
 Extracting Bazel installation...
@@ -56,20 +58,27 @@ Target //:hello up-to-date:
 INFO: Elapsed time: 8.451s, Critical Path: 0.62s
 INFO: 2 processes: 2 linux-sandbox.
 INFO: Build completed successfully, 6 total actions
+```
+
 And run:
 
+```
 $ bazel run //:hello 
 ...
 Hello World!
-or directly:
+```
 
+or directly:
+```
 $ ./bazel-bin/hello
 Hello World!
-Downloading dependencies
+```
+## Downloading dependencies
 In order to setup our cross compilation environment we need to download our toolchains. Doing this manually is tedious, fortunately Bazel already includes the necessary facilities for that.
 
 For our needs we need to download two files: the compiler and the sysroot.
 
+```
 $ tree
 .
 ├── BUILD
@@ -85,26 +94,32 @@ $ tree
 │       ├── BUILD
 │       └── toolchains.bzl
 └── WORKSPACE
+```
 All the *.BUILD" files contain the specification of how to use the content of the downloaded artifacts. The *.bzl files contain Starlark code that defines the logic of downloading files and exposing them as targets.
 
 The entry point for Bazel to know that it needs to download any external content is in the WORKSPACE file:
 
+```
 $ cat WORKSPACE 
 load("//third_party:deps.bzl", "deps")
 deps()
+```
 It says: load a function called deps from the file deps.bzl in third_party package and then call it.
 
 Similar the deps.bzl:
 
+```
 $ cat third_party/deps.bzl 
 load("//third_party/toolchains:toolchains.bzl", "toolchains")
 
 def deps():
     toolchains()
+```
 It provides a level of indirection to hide the details of external packages from the WORKSPACE file.
 
 The toolchains.bzl on the other hand:
 
+```
 $ cat third_party/toolchains/toolchains.bzl 
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
@@ -145,9 +160,11 @@ def toolchains():
             sha256 = "89a72cc874420ad06394e2333dcbb17f088c2245587f1147ff9da124bb60328f",
             strip_prefix = "sysroot",
         )
+```
 
 First it loads the http_archive rule, then defines a function which has a repeating pattern inside:
 
+```
 if "NAME_OF_THE_EXTERNAL_RESOURCE" not in native.existing_rules():
     http_archive(
         name = "NAME_OF_THE_EXTERNAL_RESOURCE",
@@ -155,10 +172,12 @@ if "NAME_OF_THE_EXTERNAL_RESOURCE" not in native.existing_rules():
         url = SOME_URL,
         sha256 = SOME_SHA256,
     )
+```
 Which reads: if there is no such rule defined yet, then define it using the http_archive with given name, build file, URL and checksum.
 
 A particular *.BUILD file contains the definitions of targets coming from the downloaded artifact, for example:
 
+```
 $ cat third_party/toolchains/aarch64-rpi3-linux-gnu.BUILD 
 package(default_visibility = ['//visibility:public'])
 
@@ -168,13 +187,18 @@ filegroup(
     '**',
   ]),
 )
+```
+
 It specifies the default visibility of all the targets in this package to be public, and creates a target "toolchain" which is a handle to all the files inside the artifact.
 
 We can build such a target:
 
+```
 $ bazel build @aarch64-rpi3-linux-gnu//:toolchain
+```
 And peek what Bazel did for us:
 
+```
 $ tree -L 1 bazel-02_deps/external/aarch64-rpi3-linux-gnu/
 ├── aarch64-rpi3-linux-gnu
 ├── bin
@@ -185,17 +209,21 @@ $ tree -L 1 bazel-02_deps/external/aarch64-rpi3-linux-gnu/
 ├── libexec
 ├── share
 └── WORKSPACE
+```
 Bazel downloaded the artifact inside his cache, copied our aarch64-rpi3-linux-gnu.BUILD file as BUILD.bazel and added a WORKSPACE file indicating that this is another source tree. We can refer to all targets inside such a package by specifying the repository name: @aarch64-rpi3-linux-gnu//:toolchain.
 
-Setting up custom toolchains
+## Setting up custom toolchains
 Bazel supports two ways of setting up custom toolchains, the legacy approach with crosstool_top, and the new approach with platforms. We will construct our rules so that both approaches are available.
 
 In order to cross compile cc_rules we need to run bazel with additional arguments pointing to cross compilation toolchain definition:
 
+```
 bazel build \
     --crosstool_top=//bazel/toolchain/aarch64-rpi3-linux-gnu:gcc_toolchain \
     --cpu=aarch64
     //:hello
+```
+
 It instructs bazel to look for aarch64 toolchain in the cc_toolchain_suite rule named gcc_toolchain located in bazel/toolchain/aarch64-rpi3-linux-gnu package.
 
 This file contains definitions of all tools we want to use when cross compiling:
